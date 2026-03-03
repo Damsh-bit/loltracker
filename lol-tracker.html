@@ -1019,7 +1019,7 @@
 // ──────────────────────────────────────────────
 // CONFIG — URL del backend local
 // ──────────────────────────────────────────────
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'https://loltracker-backend.up.railway.app'; // ← cambiá por tu URL de Railway
 
 // Cache para no repetir llamadas
 const dataCache = {};
@@ -1067,13 +1067,23 @@ async function fetchPlayerData(name, server) {
   const cacheKey = `${name}-${server}`;
   if (dataCache[cacheKey]) return dataCache[cacheKey];
 
+  // 0. Obtener versión de ddragon para íconos
+  let ddVersion = '14.10.1';
+  try {
+    const vr = await fetch(`${API_BASE}/api/ddragon/version`);
+    const vd = await vr.json();
+    ddVersion = vd.version || ddVersion;
+  } catch(e) {}
+  const DD = `https://ddragon.leagueoflegends.com/cdn/${ddVersion}`;
+
   // 1. Summoner + ranked
   const summonerRes = await fetch(`${API_BASE}/api/summoner/${server}/${encodeURIComponent(name)}`);
   if (!summonerRes.ok) {
     const err = await summonerRes.json();
     throw new Error(err.error || `Error ${summonerRes.status}`);
   }
-  const { summoner, soloQ } = await summonerRes.json();
+  const summonerData = await summonerRes.json();
+  const { summoner, soloQ } = summonerData;
 
   // 2. Actividad (heatmap)
   const activityRes = await fetch(`${API_BASE}/api/activity/${server}/${summoner.puuid}`);
@@ -1160,6 +1170,8 @@ async function fetchPlayerData(name, server) {
   const lpLost   = rankedOnly.filter(m => !m.win).reduce((s, m) => s + m.lpChange, 0);
   const netLP    = lpGained + lpLost;
 
+  const masteryTop = summonerData.masteryTop || [];
+
   const result = {
     rank,
     currentLP,
@@ -1171,6 +1183,11 @@ async function fetchPlayerData(name, server) {
     lpGained,
     lpLost,
     netLP,
+    masteryTop,
+    profileIconId: summoner.profileIconId,
+    summonerLevel: summoner.summonerLevel,
+    ddVersion,
+    DD,
   };
 
   dataCache[cacheKey] = result;
@@ -1256,8 +1273,8 @@ function renderFriendsList() {
     const isActive = activeFriend && activeFriend.id === f.id;
     return `
     <div class="friend-card ${isActive ? 'active' : ''}" onclick="selectFriend(${JSON.stringify(f).replace(/"/g, '&quot;')})">
-      <div class="friend-avatar" style="background:${getAvatarColor(f.name)};color:${getTextColor(f.name)}">
-        ${f.name[0].toUpperCase()}
+      <div class="friend-avatar" style="background:${getAvatarColor(f.name)};color:${getTextColor(f.name)};padding:0;overflow:hidden">
+        ${(() => { const c = dataCache[f.name+'-'+f.server]; const dd = c && c.DD; const icon = c && c.profileIconId; return (dd && icon) ? `<img src="${dd}/img/profileicon/${icon}.png" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'"/>` : f.name[0].toUpperCase(); })()}
       </div>
       <div class="friend-info">
         <div class="friend-name">${f.name}</div>
@@ -1320,6 +1337,30 @@ async function selectFriend(friend) {
   }
 }
 
+function buildMasteryCards(data) {
+  if (!data.masteryTop || !data.masteryTop.length) {
+    return '<div style="color:var(--text3);font-family:JetBrains Mono,monospace;font-size:12px">Sin datos de maestría</div>';
+  }
+  return data.masteryTop.map(function(m, i) {
+    const champKey = m.championName || String(m.championId);
+    const pts = m.masteryPoints >= 1000000 ? (m.masteryPoints/1000000).toFixed(1)+'M'
+              : m.masteryPoints >= 1000 ? (m.masteryPoints/1000).toFixed(0)+'K'
+              : String(m.masteryPoints);
+    const imgSrc = data.DD + '/img/champion/' + champKey + '.png';
+    return '<div style="background:var(--panel);border:1px solid var(--border2);padding:14px 18px;display:flex;align-items:center;gap:12px;flex:1">'
+      + '<div style="position:relative;flex-shrink:0">'
+      + '<img src="' + imgSrc + '" style="width:48px;height:48px;border-radius:50%;border:2px solid var(--border2)"/>'
+      + '<div style="position:absolute;bottom:-4px;right:-4px;background:var(--gold);color:var(--bg);font-family:Orbitron,monospace;font-size:9px;font-weight:900;padding:1px 4px;border-radius:2px">' + (i+1) + '</div>'
+      + '</div>'
+      + '<div>'
+      + '<div style="font-size:14px;font-weight:600;color:var(--text)">' + champKey + '</div>'
+      + '<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:var(--gold)">Nivel ' + m.masteryLevel + '</div>'
+      + '<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:var(--text3)">' + pts + ' pts</div>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
 function buildPlayerView(friend, data) {
   const todayStr = new Date().toISOString().split('T')[0];
   const todayData = data.activityData.find(d => d.date === todayStr);
@@ -1329,6 +1370,7 @@ function buildPlayerView(friend, data) {
   const netColor = data.netLP >= 0 ? 'var(--green)' : 'var(--red)';
   const netPrefix = data.netLP >= 0 ? '+' : '';
 
+  const DD = data.DD || 'https://ddragon.leagueoflegends.com/cdn/14.10.1';
   const matchesHTML = data.recentMatches.map(m => {
     const lpColor = m.win ? 'var(--green)' : 'var(--red)';
     const lpPrefix = m.win ? '+' : '';
@@ -1338,7 +1380,11 @@ function buildPlayerView(friend, data) {
     return `
     <div class="match-row ${m.win ? 'win' : 'loss'}">
       <div class="match-result-badge">${m.win ? 'WIN' : 'LOSS'}</div>
-      <div class="match-champ">${m.icon}</div>
+      <div class="match-champ" style="padding:0;overflow:hidden">
+        <img src="\${data.DD}/img/champion/\${m.champion}.png"
+             style="width:38px;height:38px;object-fit:cover"
+             onerror="this.style.display='none';this.parentNode.textContent='\${m.icon}'"/>
+      </div>
       <div class="match-info">
         <div class="match-champ-name">${m.champion}</div>
         <div class="match-mode">${m.mode} · ${m.duration}min</div>
@@ -1355,12 +1401,17 @@ function buildPlayerView(friend, data) {
 
   return `
   <div class="player-header animate-in">
-    <div class="player-big-avatar" style="background:${getAvatarColor(friend.name)};color:${getTextColor(friend.name)}">
-      ${friend.name[0].toUpperCase()}
+    <div class="player-big-avatar" style="padding:0;overflow:hidden;background:${getAvatarColor(friend.name)}">
+      <img src="${data.DD}/img/profileicon/${data.profileIconId}.png"
+           style="width:100%;height:100%;object-fit:cover;"
+           onerror="this.style.display='none';this.parentNode.textContent='${friend.name[0].toUpperCase()}'"/>
     </div>
     <div class="player-details">
       <div class="player-name">${friend.name}</div>
       <span class="player-server-badge">${friend.server}</span>
+      <span class="player-server-badge" style="margin-left:6px;border-color:var(--gold-dim);color:var(--gold)">
+        Nv. ${data.summonerLevel}
+      </span>
       <div class="player-rank-row">
         <div class="rank-badge">
           <span class="rank-icon">${data.rank.icon}</span>
@@ -1429,7 +1480,17 @@ function buildPlayerView(friend, data) {
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:30px;align-items:start">
+  <div class="section animate-in" style="margin-bottom:24px">
+    <div class="section-header">
+      <span class="section-title">Maestría de Campeones</span>
+      <div class="section-line"></div>
+    </div>
+    <div style="display:flex;gap:16px">
+      ${buildMasteryCards(data)}
+    </div>
+  </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:30px;align-items:start">
 
     <div class="section animate-in" style="margin-bottom:0">
       <div class="section-header">

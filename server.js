@@ -128,6 +128,20 @@ app.get('/api/summoner/:server/:name', async (req, res) => {
     const soloQ = ranked.find(r => r.queueType === 'RANKED_SOLO_5x5') || null;
     const flexQ = ranked.find(r => r.queueType === 'RANKED_FLEX_SR')  || null;
 
+    // Maestría top 3
+    let masteryTop = [];
+    try {
+      const mastery = await riotFetch(
+        'https://' + platform + '/lol/champion-mastery/v4/champion-masteries/by-puuid/' + account.puuid + '/top?count=3'
+      );
+      masteryTop = mastery.map(m => ({
+        championId:    m.championId,
+        championName:  m.championName || null,
+        masteryLevel:  m.championLevel,
+        masteryPoints: m.championPoints,
+      }));
+    } catch(e) { console.error('Mastery error:', e.message); }
+
     const result = {
       summoner: {
         puuid:         account.puuid,
@@ -137,6 +151,7 @@ app.get('/api/summoner/:server/:name', async (req, res) => {
         tagLine:       account.tagLine,
       },
       soloQ, flexQ,
+      masteryTop,
     };
 
     cacheSet(cacheKey, result, CACHE_TTL.summoner);
@@ -144,6 +159,47 @@ app.get('/api/summoner/:server/:name', async (req, res) => {
   } catch (err) {
     console.error('ERROR summoner:', err.message);
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/ddragon/version — versión actual del juego
+// ─────────────────────────────────────────────
+app.get('/api/ddragon/version', async (req, res) => {
+  const cacheKey = 'ddragon:version';
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json(cached);
+  try {
+    const r = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
+    const versions = await r.json();
+    const result = { version: versions[0] };
+    cacheSet(cacheKey, result, 60 * 60 * 1000); // 1 hora
+    res.json(result);
+  } catch(e) {
+    res.json({ version: '14.10.1' }); // fallback
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/ddragon/champions — mapa id→nombre
+// ─────────────────────────────────────────────
+app.get('/api/ddragon/champions', async (req, res) => {
+  const cacheKey = 'ddragon:champions';
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json(cached);
+  try {
+    const vr = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
+    const versions = await vr.json();
+    const version = versions[0];
+    const cr = await fetch('https://ddragon.leagueoflegends.com/cdn/' + version + '/data/es_MX/champion.json');
+    const data = await cr.json();
+    // Construir mapa championId → { name, key }
+    const map = {};
+    Object.values(data.data).forEach(c => { map[c.key] = c.id; });
+    cacheSet(cacheKey, { version, champions: map }, 60 * 60 * 1000);
+    res.json({ version, champions: map });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
