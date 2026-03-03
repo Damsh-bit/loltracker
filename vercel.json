@@ -1,5 +1,10 @@
 {
-  "rewrites": [
-    { "source": "/", "destination": "/lol-tracker.html" }
+  "version": 2,
+  "builds": [
+    { "src": "lol-tracker.html", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/", "dest": "/lol-tracker.html" },
+    { "src": "/riot.txt", "dest": "/riot.txt" }
   ]
 }
