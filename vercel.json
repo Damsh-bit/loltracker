@@ -1,7 +1,8 @@
 {
   "version": 2,
   "builds": [
-    { "src": "lol-tracker.html", "use": "@vercel/static" }
+    { "src": "lol-tracker.html", "use": "@vercel/static" },
+    { "src": "riot.txt/riot.txt", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/", "dest": "/lol-tracker.html" },
