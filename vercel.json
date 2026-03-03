@@ -5,6 +5,7 @@
   ],
   "routes": [
     { "src": "/", "dest": "/lol-tracker.html" },
-    { "src": "/riot.txt", "dest": "/riot.txt" }
+    { "src": "/riot.txt", "dest": "/riot.txt" },
+    { "src": "/riot.txt/riot.txt", "dest": "/riot.txt" }
   ]
 }
